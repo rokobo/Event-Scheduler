@@ -1,0 +1,25 @@
+body {
+    background-color: rgb(30, 30, 30);
+    color: rgb(203, 203, 203)
+} 
+.accordion-button {
+    font-size: x-large;
+    text-align: center;
+    display: block;
+    background-color: rgb(231, 241, 255);
+    color: rgb(12, 99, 228);
+}
+.accordion-body {
+    background-color: rgb(30, 30, 30);
+    color: rgb(203, 203, 203)
+}
+.accordion-button:not(.collapsed) {
+    background-color: rgb(231, 241, 255);
+    color: rgb(12, 99, 228);
+}
+.btn {
+    width: 100%;
+}
+body::-webkit-scrollbar {
+    width: 0em;
+}
