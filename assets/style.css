@@ -23,3 +23,8 @@ body {
 body::-webkit-scrollbar {
     width: 0em;
 }
+.tooltip-inner {
+    background: rgb(0, 0, 0);
+    color: rgb(255, 255, 255);
+    border: 2px solid rgb(255, 0, 0);
+}

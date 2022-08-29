@@ -1,7 +1,8 @@
 """
 Automatic task scheduler using Dash.
 
-Functionalities:
+The scheduler algorithm is implemented using a recursive backtracking 
+approach to events with certain possible conditions like:
     Define first event of the day.
     Define last event of the day.
     Define how many times an event should occur (day/week).
@@ -129,6 +130,7 @@ app.layout = html.Div([
                                     dbc.Select(id="select_interval", options=[
                                         {'label': 'per day', 'value': 'per day'},
                                         {'label': 'per week', 'value': 'per week'},
+                                        {'label': 'per month', 'value': 'per month'},
                                         {'label': 'per monday',
                                             'value': 'per monday'},
                                         {'label': 'per tuesday',
@@ -506,28 +508,75 @@ app.layout = html.Div([
                 ],
                     item_id="item3",
                     title="Breaks and Allowed event times ↓")
-            ], always_open=True, active_item=["item1", "item2", "item3"])
+            ], always_open=True, active_item=["item1", "item2", "item3"]) 
         ], width=6),
         dbc.Col([
             dbc.Row([
                 dbc.Col([
                     dcc.Upload(
                         dbc.Button(
-                            'Upload config.ini', color="primary", outline=False
+                            'Upload config.ini', color="info", outline=False
                         ), id='upload_config'
                     )
                 ]),
                 dbc.Col([
                     dbc.Button(
-                        "Download config.ini", color="primary", outline=False),
+                        "Download config.ini", color="info", outline=False),
                     dcc.Download(id="download_config")
                 ]),
                 dbc.Col([
                     dbc.Button(
-                        "Download schedule", color="primary", outline=False),
+                        "Download schedule", color="info", outline=False),
                     dcc.Download(id="download_schedule")
                 ])
             ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Select(id="select_fit_interval", options=[
+                        {'label': 'Fit every 1 minute', 'value': 1},
+                        {'label': 'Fit every 2 minutes', 'value': 2},
+                        {'label': 'Fit every 3 minutes', 'value': 3},
+                        {'label': 'Fit every 5 minutes', 'value': 5},
+                        {'label': 'Fit every 10 minutes', 'value': 10},
+                        {'label': 'Fit every 15 minutes', 'value': 15},
+                    ], placeholder="Event fit interval"),
+                    dbc.Tooltip(
+                        "Select how often a pending event should \
+                            try a fit after another set event. Note that\
+                                more frequent fits take more time to process",
+                        target="select_fit_interval"
+                    )
+                ]),
+                dbc.Col([
+                    dbc.Button(
+                        "Make schedule", id="make_schedule_button",
+                        color="success", outline=False
+                    ),
+                    dbc.Tooltip(
+                        "The monthly schedule will be divided into 4 weeks\
+                            that can be accessed using the buttons below",
+                        target="make_schedule_button"
+                    )
+                ], width=4)
+            ], style={"margin-top": "20px"}),
+            dbc.Row([
+                dbc.Col([dbc.Button(
+                    "Week 1", id="select_week_1",
+                    color="primary", outline=False
+                )]),
+                dbc.Col([dbc.Button(
+                    "Week 2", id="select_week_2",
+                    color="primary", outline=False
+                )]),
+                dbc.Col([dbc.Button(
+                    "Week 3", id="select_week_3",
+                    color="primary", outline=False
+                )]),
+                dbc.Col([dbc.Button(
+                    "Week 4", id="select_week_4",
+                    color="primary", outline=False
+                )]),
+            ], style={"margin-top": "20px"}),
             dbc.Row([
                 dcc.Graph(
                     id="schedule",
@@ -1053,8 +1102,11 @@ def show_logic_rule_checklist(
         value = options
     return value, options
 
-@callback(Output('schedule', 'figure'), Input('frequency_button', 'n_clicks'))
-def display_schedule(a):
+@callback(Output('schedule', 'figure'),
+          Input('make_schedule_button', 'n_clicks'),
+          Input('select_fit_interval', 'value'))
+def display_schedule(_dummy, fit_interval):
+    scheduler.fit_length = fit_interval
     days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
     data = [
         ["blocked time", 0, 24],
