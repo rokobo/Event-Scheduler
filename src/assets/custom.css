@@ -2,6 +2,9 @@ body {
     background-color: rgb(30, 30, 30);
     color: rgb(203, 203, 203)
 } 
+h1, h2, h3, h4, h5, h6 {
+    text-align: center;
+}
 .accordion-button {
     font-size: x-large;
     text-align: center;
@@ -26,5 +29,24 @@ body::-webkit-scrollbar {
 .tooltip-inner {
     background: rgb(0, 0, 0);
     color: rgb(255, 255, 255);
-    border: 2px solid rgb(255, 0, 0);
+    border: 3px solid rgb(128, 0, 255);
+}
+
+.mainChecklistStyle {
+    column-count: 4;
+}
+.subChecklistStyle {
+    column-count: 2;
+}
+.checklistContainer {
+    overflow-y: auto;
+    height: 700px;
+}
+::-webkit-scrollbar {
+    background: rgb(36, 36, 36);
+    width: 4px;
+    height: 4px;
+}
+::-webkit-scrollbar-thumb {
+    background: rgb(231, 241, 255);
 }
