@@ -529,41 +529,32 @@ end
 function checkEventTimes(schedule::Vector{Tuple{String,Int64,Int64}}, index::Int64, data::Scheduler)::Bool
     # Current schedule is only valid if one rule fully allows it
     event = schedule[index]
-    eventDayStart = (event[2] ÷ 1440)
-    eventDayEnd = (event[3] ÷ 1440)
+    eventStartDay = (event[2] ÷ 1440)
 
     for rule in data.eventTimes
-        # Multiple checks to ensure the rule fully applies to the situation
         if event[1] != rule[1] continue end
-        ruleStart = (rule[2] * 60) + rule[3]
-        ruleEnd = (rule[4] * 60) + rule[5]
         if rule[6] == "every day"
-            if eventDayStart == eventDayEnd 
-                if event[2] % 1440 ≥ ruleStart && 
-                    event[3] % 1440 ≤ ruleEnd
-                    return false 
-                end
-            elseif event[3] % 1440 == 0
-                if event[2] % 1440 ≥ ruleStart && 
-                    ruleStart > ruleEnd
-                    return false
-                end
-            else # eventDayStart != eventDayEnd 
-                if event[2] % 1440 ≥ ruleStart && 
-                    event[3] % 1440 ≤ ruleEnd &&
-                    ruleStart > ruleEnd
-                    return false 
-                end
+            # Checks absolute allowed time (uses event minute system)
+            allowedStart = (eventStartDay * 1440) + (rule[2] * 60) + rule[3]
+            allowedEnd = (eventStartDay * 1440) + (rule[4] * 60) + rule[5]
+            if allowedEnd < allowedStart # For rules that end in the next day
+                allowedEnd += 1440
             end
-        else
-            weekday = split(rule[6], " ")[2]
-            weekdayStart = numberToWeek[((event[2] ÷ 1440) % 7) + 1]
-            if weekdayStart != weekday continue end
-            weekdayEnd = numberToWeek[((event[3] ÷ 1440) % 7) + 1]
-            if event[2] % 1440 ≥ ruleStart &&
-                event[3] % 1440 ≤ ruleEnd && 
-                eventDayStart == eventDayEnd
-                return false
+            if event[2] >= allowedStart && event[3] <= allowedEnd 
+                return false 
+            end
+        else # weekdays
+            weekNumber = weekToNumber[split(rule[6], " ")[2]]
+            # Iterate over absolute allowed times (uses event minute system)
+            for i in range(0, 3)
+                allowedStart = ((weekNumber + i) * 1440) + (rule[2] * 60) + rule[3]
+                allowedEnd = ((weekNumber + i) * 1440) + (rule[4] * 60) + rule[5]
+                if allowedEnd < allowedStart # For rules that end in the next day
+                    allowedEnd += 1440
+                end
+                if event[2] >= allowedStart && event[3] <= allowedEnd 
+                    return false 
+                end
             end
         end
     end
