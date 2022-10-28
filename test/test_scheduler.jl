@@ -146,7 +146,7 @@ end
     @test create_schedule(scheduler) == [("math", 0, 5), ("break", 5, 40315)]
     scheduler.logic = Set([("math", "after", "break")])
     scheduler.eventCount = Set([("break", 1, 40, "per month"), ("math", 1, 5, "per month")])
-    @test create_schedule(scheduler) == [("break", 0, 40), ("math", 40, 45)]
+    @test create_schedule(scheduler) ∈ [[("break", 0, 40), ("math", 40, 45)]]
 end
 
 @testitem "1xBeforeLogic" begin
@@ -161,15 +161,33 @@ end
     @test create_schedule(scheduler) == [("math", 0, 40), ("break", 40, 40240)]
 end
 
-@testitem "CheckFirstOrLast" begin
+@testitem "checkFirst" begin
     """Tests event logic functionality."""
     scheduler = Scheduler()
     scheduler.firstEvents["sunday"] = ["chem"]
-    @test checkFirstOrLast([("START", -1, 0),("chem", 0, 15),("END", 40320, 40321)], true, scheduler) == false
-    @test checkFirstOrLast([("START", -1, 0),("math", 0, 15),("END", 40320, 40321)], true, scheduler) == true
+    @test checkFirst([("START", -1, 0),("chem", 0, 15),("END", 40320, 40321)], scheduler) == false
+    @test checkFirst([("START", -1, 0),("math", 0, 15),("END", 40320, 40321)], scheduler) == true
+    @test checkFirst([("START", -1, 0),("math", 0, 1430),("math", 1430, 1500),("END", 40320, 40321)], scheduler) == true
+    @test checkFirst([("START", -1, 0),("chem", 0, 1430),("math", 1430, 1500),("END", 40320, 40321)], scheduler) == false
+    scheduler.firstEvents["sunday"] = ["math"]
+    @test checkFirst([("START", -1, 0),("math", 0, 1430),("chem", 1430, 1500),("END", 40320, 40321)], scheduler) == false
+    @test checkFirst([("START", -1, 0),("math", 0, 1450),("chem", 1450, 1500),("END", 40320, 40321)], scheduler) == false
 end
 
-@testitem "1xfirstEvent" begin
+@testitem "checkLast" begin
+    scheduler = Scheduler()
+    scheduler.lastEvents["sunday"] = ["chem"]
+    @test checkLast([("START", -1, 0),("chem", 0, 15),("END", 40320, 40321)], scheduler) == false
+    @test checkLast([("START", -1, 0),("math", 0, 15),("END", 40320, 40321)], scheduler) == true
+    @test checkLast([("START", -1, 0),("math", 0, 1430),("math", 1430, 1500),("END", 40320, 40321)], scheduler) == true
+    @test checkLast([("START", -1, 0),("chem", 0, 1430),("math", 1430, 1500),("END", 40320, 40321)], scheduler) == true
+    @test checkLast([("START", -1, 0),("math", 0, 1450),("chem", 1450, 1500),("END", 40320, 40321)], scheduler) == true
+    scheduler.lastEvents["sunday"] = ["math"]
+    @test checkLast([("START", -1, 0),("math", 0, 1430),("chem", 1430, 1500),("END", 40320, 40321)], scheduler) == true
+    @test checkLast([("START", -1, 0),("math", 0, 10000),("chem", 10000, 10050),("END", 40320, 40321)], scheduler) == false
+end
+
+@testitem "1xFirstEvent" begin
     scheduler = Scheduler()
     scheduler.fitInterval = 30
     scheduler.eventCount = Set([("chem", 1, 30, "per month"), ("math", 1, 30, "per month")])
@@ -179,7 +197,7 @@ end
     @test create_schedule(scheduler) == [("math", 0, 30),("chem", 30, 60)]
     scheduler.eventCount = Set([("chem", 1, 1400, "per month"), ("math", 1, 1400, "per month")])
     scheduler.firstEvents["monday"] = ["chem"]
-    @test create_schedule(scheduler) == [("math", 0, 1400), ("chem", 1440, 2840)]
+    @test create_schedule(scheduler) == [("math", 0, 1400), ("chem", 1410, 2810)]
     scheduler.firstEvents["monday"] = ["math"]
     @test create_schedule(scheduler) ∈ [[("chem", 0, 1400), ("math", 1440, 2840)],
                                         [("math", 60, 1460), ("chem", 1470, 2870)]]
@@ -189,10 +207,63 @@ end
     @test create_schedule(scheduler) == [("math", 0, 100),("chem", 100, 200),("chem", 200, 300)]
 end
 
-@testitem "lastEvent" begin
+@testitem "1xLastEvent" begin
     scheduler = Scheduler()
+    scheduler.fitInterval = 30
+    scheduler.eventCount = Set([("chem", 1, 30, "per month"), ("math", 1, 30, "per month")])
+    scheduler.lastEvents["sunday"] = ["chem"]
+    @test create_schedule(scheduler) == [("math", 0, 30),("chem", 30, 60)]
+    scheduler.lastEvents["sunday"] = ["math"]
+    @test create_schedule(scheduler) ∈ [[("math", 0, 30), ("chem", 1440, 1470)],[("chem", 0, 30),("math", 30, 60)]] 
+    scheduler.eventCount = Set([("chem", 1, 1400, "per month"), ("math", 1, 1400, "per month")])
+    scheduler.lastEvents["monday"] = ["chem"]
+    @test create_schedule(scheduler) ∈ [[("chem", 0, 1400), ("math", 2900, 4300)],[("math", 0, 1400), ("chem", 1440, 2840)]]
+    scheduler.lastEvents["monday"] = ["math"]
+    @test create_schedule(scheduler) == [("chem", 0, 1400), ("math", 1400, 2800)]
+
+    scheduler.fitInterval = 100
+    scheduler.eventCount = Set([("chem", 2, 100, "per month"), ("math", 1, 100, "per month")])
+    scheduler.lastEvents["sunday"] = ["math"]
+    @test create_schedule(scheduler) == [("chem", 0, 100), ("chem", 100, 200), ("math", 200, 300)]
 end
 
-@testitem "eventTimes" begin
+@testitem "1x1x1EventTimes" begin
+    """1 event, 1 rule and 1 day."""
     scheduler = Scheduler()
+    scheduler.eventTimes = Set([("math", 2, 30, 4, 0, "every day")])
+    scheduler.eventCount = Set([("math", 1, 30, "per month")])
+    @test create_schedule(scheduler) == [("math", 150, 180)]
+    scheduler.eventCount = Set([("math", 1, 91, "per month")])
+    @test create_schedule(scheduler) == []
+    scheduler.eventCount = Set([("math", 1, 30, "per month")])
+    scheduler.eventTimes = Set([("math", 2, 30, 4, 0, "every sunday")])
+    @test create_schedule(scheduler) == [("math", 150, 180)]
+    scheduler.eventTimes = Set([("math", 2, 30, 4, 0, "every monday")])
+    @test create_schedule(scheduler) == [("math", 1590, 1620)]
 end
+
+@testitem "1x2x1EventTimes" begin
+    """1 event, 2 rules and 1 day."""
+    scheduler = Scheduler()
+    scheduler.eventTimes = Set([("math", 2, 30, 2, 45, "every day"),("math", 5, 0, 5, 30, "every day")])
+    scheduler.eventCount = Set([("math", 1, 30, "per month")])
+    @test create_schedule(scheduler) == [("math", 300, 330)]
+end
+
+@testitem "2x1x1EventTimes" begin
+    """2 event, 1 rule and 1 day."""
+    scheduler = Scheduler()
+    scheduler.eventTimes = Set([("math", 0, 0, 1, 30, "every day")])
+    scheduler.eventCount = Set([("math", 2, 30, "per month")])
+    @test create_schedule(scheduler) == [("math", 0, 30),("math", 30, 60)]
+end
+
+@testitem "2x1x2CheckEventTimes" begin
+    """2 event, 1 rule and 2 day."""
+    scheduler = Scheduler()
+    scheduler.eventTimes = Set([("math", 23, 30, 1, 30, "every day")])
+    scheduler.eventCount = Set([("math", 29, 60, "per month")])
+    @test checkEventTimes([("START", -1, 0),("math", 1410, 1470), 
+        ("math", 1470, 1530),("END", 40320, 40321)],2,scheduler) == false
+end
+

@@ -1,7 +1,6 @@
 module scheduler
-export create_schedule, cleanEvents, checkFirstOrLast
-# export setEvents, setBlocked, setLogic
-# export getBlocked
+export create_schedule
+export cleanEvents, checkFirst, checkLast, checkEventTimes
 export Scheduler
 
 weekToNumber = Dict([
@@ -15,23 +14,48 @@ numberToWeek = String[
 ]
 
 mutable struct Scheduler
+    """
+    eventCount = Name, duration and repetition of events e.g.("math", 2, 3, "per week")
+    eventTimes = Allowed times for a given event e.g.("math", 2, 34, 15, 7, "every day")
+    logic = Sequential logic: which events go before or after others e.g.("math", "before", "chem")
+    blockedTimes = Times where events cannot exist e.g.(12, 4, 21, 45, "per day")
+    fitInterval = Interval between each event fit attempt
+    firstEvents = Allowed first events for each weekday
+    lastEvents = Allowed last events for each weekday
+    hasTimes = If there are event times rules (for optimization)
+    hasFirst = If there are first event rules (for optimization)
+    hasLast = If there are last event rules   (for optimization)
+    allTimes = All event times events         (for optimization)
+    allFirst = All allowed first events       (for optimization)
+    allLast = All allowed last events         (for optimization)
+    maxEventsLeft = Total number of events    (for optimization)
+    """
     eventCount::Set{Tuple{String,Int64,Int64,String}}
     eventTimes::Set{Tuple{String,Int64,Int64,Int64,Int64,String}}
     logic::Set{Tuple{String,String,String}}
     blockedTimes::Set{Tuple{Int64,Int64,Int64,Int64,String}}
+    hasTimes::Bool
     hasFirst::Bool
     hasLast::Bool
     fitInterval::Int64
+    allTimes::Set{String}
     allFirst::Set{String}
     allLast::Set{String}
     maxEventsLeft::Int64
     firstEvents::Dict{String, Vector{String}}
     lastEvents::Dict{String, Vector{String}}
     Scheduler() = new(
-        Set(), Set(), Set(), Set(), false, false, 1, Set(), Set(), 0,
+        Set(), Set(), Set(), Set(), false, false, false, 1, Set(), Set(), Set(), 0,
         Dict("monday"=>[],"tuesday"=>[],"wednesday"=>[],"thursday"=>[],"friday"=>[],"saturday"=>[],"sunday"=>[]),
         Dict("monday"=>[],"tuesday"=>[],"wednesday"=>[],"thursday"=>[],"friday"=>[],"saturday"=>[],"sunday"=>[]),
     )
+end
+
+function printConfig(data::Scheduler)
+    println("\u001b[96mEvent count: ", data.eventCount, "\u001b[0m")
+    println("\u001b[96mAll times: ", data.allTimes, "\u001b[0m")
+    println("\u001b[96mFirst events: ", data.allFirst, "\u001b[0m")
+    println("\u001b[96mLast events: ", data.allLast, "\u001b[0m")
 end
 
 function create_schedule(data::Scheduler)::Vector{Tuple{String,Int64,Int64}}
@@ -40,9 +64,7 @@ function create_schedule(data::Scheduler)::Vector{Tuple{String,Int64,Int64}}
     schedule = addBlockedEvents(data)
     schedule = append!([("START", -1, 0)], schedule)
     push!(schedule, ("END", 40320, 40321))
-    println("\u001b[96mItems left: ", itemsLeft, "\u001b[0m")
-    println("\u001b[96mEvent count: ", data.eventCount, "\u001b[0m")
-    println("\u001b[96mFirst events: ", data.allFirst, "\u001b[0m")
+    printConfig(data)
     backtrack(schedule, itemsLeft, 1, data)
     global schedule
     schedule = schedule[2:end-1]
@@ -103,6 +125,28 @@ function optimize(left::Vector{Tuple{String, Int32}}, data::Scheduler)
         end
         data.allFirst = Set(firstEvents)
     end
+
+    lastEventList = values(data.lastEvents)
+    if any(x -> !isempty(x), lastEventList)
+        data.hasLast = true
+        lastEvents = Vector{String}()
+        for items in lastEventList
+            if !isempty(items)
+                append!(lastEvents, items)
+            end
+        end
+        data.allLast = Set(lastEvents)
+    end
+
+    data.hasTimes = !isempty(data.eventTimes)
+    if data.hasTimes
+        eventTimes = Vector{String}()
+        for event in data.eventTimes
+            push!(eventTimes, event[1])
+        end
+        data.allTimes = Set(eventTimes)
+    end
+
     data.maxEventsLeft = length(left)
 end
 
@@ -136,11 +180,18 @@ function addBlockedEvents(data::Scheduler)::Vector{Tuple{String,Int64,Int64}}
     return cleanEvents(sort(blocks))
 end
 
-function invalid(schedule::Vector{Tuple{String,Int64,Int64}}, index::Int64, data::Scheduler)::Bool
+function invalid(schedule::Vector{Tuple{String,Int64,Int64}}, index::Int64, isFull::Bool, data::Scheduler)::Bool
+    # No schedule that is incorrect but could be correct later shall be rejected here
+    if data.hasTimes
+        if schedule[index][1] ∈ data.allTimes
+            if checkEventTimes(schedule, index, data)
+                return true
+            end
+        end
+    end
     if length(schedule) < 3
         return false
     end
-
     if length(schedule) > 3
         if checkEventLogic(schedule, index, data)
             return true
@@ -150,15 +201,19 @@ function invalid(schedule::Vector{Tuple{String,Int64,Int64}}, index::Int64, data
         return true
     end
     if data.hasFirst
-        if schedule[index][1] ∈ data.allFirst
-            if checkFirstOrLast(schedule, true, data)
+        if isFull
+            if checkFirst(schedule, data)
                 return true
             end
         end
     end
-    # if hasLastEvents:
-    #     if checkFirstOrLast(schedule, false):
-    #         return true
+    if data.hasLast
+        if isFull
+            if checkLast(schedule, data)
+                return true
+            end
+        end
+    end
     return false
 end
 
@@ -256,7 +311,6 @@ function checkEventCountInDay(schedule::Vector{Tuple{String,Int64,Int64}}, day::
     count = 1
     # Count events going backwards from added element
     while true
-        #println(println(current))
         if current == 0
             break
         end
@@ -303,8 +357,6 @@ function checkEventCountInDay(schedule::Vector{Tuple{String,Int64,Int64}}, day::
     end
 
     if count > rule[2]
-        #println("\u001b[31mInvalid event count in day, count:", 
-        #count, ", ", rule, "\u001b[0m")
         return true
     end
     return false
@@ -388,13 +440,12 @@ function checkEventCountInMonth(schedule::Vector{Tuple{String,Int64,Int64}}, rul
     return false
 end
 
-function checkFirstOrLast(schedule::Vector{Tuple{String,Int64,Int64}}, first::Bool, data::Scheduler)::Bool
+function checkFirst(schedule::Vector{Tuple{String,Int64,Int64}}, data::Scheduler)::Bool
     lastCheckedDay = nothing
     for i in range(2, length(schedule) - 1)
         event = schedule[i]
         eventStartDay = event[2] ÷ 1440
         eventEndDay = event[3] ÷ 1440
-        # Check if 
         if lastCheckedDay == eventStartDay
             if eventStartDay == eventEndDay
                 continue
@@ -403,7 +454,8 @@ function checkFirstOrLast(schedule::Vector{Tuple{String,Int64,Int64}}, first::Bo
                     allowed_events = data.firstEvents[
                         numberToWeek[(day % 7) + 1]]
                     lastCheckedDay = day
-                    if allowed_events === nothing
+                    # Check if there are any rules for the day
+                    if isempty(allowed_events)
                         continue
                     end
                     if event[1] ∉ allowed_events
@@ -413,12 +465,13 @@ function checkFirstOrLast(schedule::Vector{Tuple{String,Int64,Int64}}, first::Bo
             end
         else
             lastCheckedDay = eventStartDay
-            # Check if event is the first
+            # Check if event is the first event of the start day until the end day
             for day in range(eventStartDay, eventEndDay)
                 allowed_events = data.firstEvents[
                     numberToWeek[(day % 7) + 1]]
                 lastCheckedDay = day
-                if allowed_events === nothing
+                # Check if there are any rules for the day
+                if isempty(allowed_events)
                     continue
                 end
                 if event[1] ∉ allowed_events
@@ -428,6 +481,93 @@ function checkFirstOrLast(schedule::Vector{Tuple{String,Int64,Int64}}, first::Bo
         end
     end
     return false
+end
+
+function checkLast(schedule::Vector{Tuple{String,Int64,Int64}}, data::Scheduler)::Bool
+    lastCheckedDay = nothing
+    for i in range(length(schedule) - 1, 2, step=-1)
+        event = schedule[i]
+        eventStartDay = event[2] ÷ 1440
+        eventEndDay = event[3] ÷ 1440
+        if lastCheckedDay == eventStartDay
+            if eventStartDay == eventEndDay
+                continue
+            else
+                for day in range(eventEndDay +1, eventStartDay + 1, step=-1)
+                    allowed_events = data.lastEvents[
+                        numberToWeek[(day % 7) + 1]]
+                    lastCheckedDay = day
+                    # Check if there are any rules for the day
+                    if isempty(allowed_events)
+                        continue
+                    end
+                    if event[1] ∉ allowed_events
+                        return true
+                    end
+                end
+            end
+        else
+            lastCheckedDay = eventEndDay
+            # Check if event is the last event of the end day until the start day
+            for day in range(eventEndDay, eventStartDay, step=-1)
+                allowed_events = data.lastEvents[
+                    numberToWeek[(day % 7) + 1]]
+                lastCheckedDay = day
+                # Check if there are any rules for the day
+                if isempty(allowed_events)
+                    continue
+                end
+                if event[1] ∉ allowed_events
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+function checkEventTimes(schedule::Vector{Tuple{String,Int64,Int64}}, index::Int64, data::Scheduler)::Bool
+    # Current schedule is only valid if one rule fully allows it
+    event = schedule[index]
+    eventDayStart = (event[2] ÷ 1440)
+    eventDayEnd = (event[3] ÷ 1440)
+
+    for rule in data.eventTimes
+        # Multiple checks to ensure the rule fully applies to the situation
+        if event[1] != rule[1] continue end
+        ruleStart = (rule[2] * 60) + rule[3]
+        ruleEnd = (rule[4] * 60) + rule[5]
+        if rule[6] == "every day"
+            if eventDayStart == eventDayEnd 
+                if event[2] % 1440 ≥ ruleStart && 
+                    event[3] % 1440 ≤ ruleEnd
+                    return false 
+                end
+            elseif event[3] % 1440 == 0
+                if event[2] % 1440 ≥ ruleStart && 
+                    ruleStart > ruleEnd
+                    return false
+                end
+            else # eventDayStart != eventDayEnd 
+                if event[2] % 1440 ≥ ruleStart && 
+                    event[3] % 1440 ≤ ruleEnd &&
+                    ruleStart > ruleEnd
+                    return false 
+                end
+            end
+        else
+            weekday = split(rule[6], " ")[2]
+            weekdayStart = numberToWeek[((event[2] ÷ 1440) % 7) + 1]
+            if weekdayStart != weekday continue end
+            weekdayEnd = numberToWeek[((event[3] ÷ 1440) % 7) + 1]
+            if event[2] % 1440 ≥ ruleStart &&
+                event[3] % 1440 ≤ ruleEnd && 
+                eventDayStart == eventDayEnd
+                return false
+            end
+        end
+    end
+    return true
 end
 
 function fit(current::Vector{Tuple{String,Int64,Int64}}, item::Tuple{String, Int32}, time::Int64)#::Tuple{Vector{Tuple{String,Int64,Int64}},Int64,Int64}
@@ -470,7 +610,7 @@ end
 
 function backtrack(current::Vector{Tuple{String,Int64,Int64}}, itemsLeft::Vector{Tuple{String, Int32}}, add_index::Int64, data::Scheduler)::Bool
     # Base cases
-    if invalid(current, add_index, data)
+    if invalid(current, add_index, isempty(itemsLeft), data)
         return false
     end
     if isempty(itemsLeft)
@@ -481,20 +621,16 @@ function backtrack(current::Vector{Tuple{String,Int64,Int64}}, itemsLeft::Vector
 
     # Recursive logic
     time = 0
+    a = length(itemsLeft)
     while true
 
-        #println("\n\u001b[36mFit time ", time, "\u001b[0m")
         newCurrent, new_add_index, newTime = fit(
             current, itemsLeft[1], time)
-        #println("\u001b[33mOld     \u001b[0m", current[2:end-1])
-        #println("\u001b[33mNew try \u001b[0m", newCurrent[2:end-1])
         if newCurrent !== nothing
-            #println(newCurrent, newTime)
             newItemsLeft = itemsLeft[2:end]
             if backtrack(newCurrent, newItemsLeft, new_add_index, data)
                 return true
             end
-            #println("Time change ", time, " to newTime: ", newTime)
             time = newTime
         end
         time += data.fitInterval

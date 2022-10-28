@@ -77,7 +77,7 @@ app.layout = html_div(style=Dict("padding" => "15px")) do
                                 placeholder="Duration",
                                 size="md", type="number"),
                             dbc_tooltip(
-                                "Type value in minutes",
+                                "Type value in minutes (maximum value is 1440)",
                                 target="select_duration")
                         ])
                     ], className="g-0"),
@@ -233,8 +233,6 @@ app.layout = html_div(style=Dict("padding" => "15px")) do
                         id="select_allowed_interval", placeholder="Interval", 
                         options= [
                             Dict("label"=>"every day", "value"=>"every day"),
-                            Dict("label"=>"every week", "value"=>"every week"),
-                            Dict("label"=>"every month", "value"=>"every month"),
                             Dict("label"=>"every monday", "value"=>"every monday"),
                             Dict("label"=>"every tuesday", "value"=>"every tuesday"),
                             Dict("label"=>"every wednesday", "value"=>"every wednesday"),
@@ -433,6 +431,7 @@ callback!(app,
     return [events for _ in range(1, 1, 18)]
 end
 
+false_list4 = Any[false, false, false, false]
 callback!(app,
     Output("select_event", "invalid"),
     Output("select_frequency", "invalid"),
@@ -449,15 +448,17 @@ callback!(app,
     State("select_interval", "value")
 ) do _refresh, event, frequency, duration, interval
     global event_count
-    values = (event, frequency, duration, interval)
-    if nothing ∈ values # Possible invalid arguments
-        if any(x -> x !== nothing, values) # Some arguments
-            return event === nothing, frequency === nothing,
-                duration === nothing, interval === nothing,
-                event, frequency, duration, interval
+    values = [event, frequency, duration, interval]
+    return_value = Any[
+        event === nothing, frequency === nothing,
+        duration === nothing || duration > 1440, 
+        interval === nothing
+    ]
+    if true ∈ return_value
+        if any(x -> x !== true, return_value) # Some arguments
+            return [return_value; values]
         else # No arguments
-            return false, false, false, false, 
-                nothing, nothing, nothing, nothing
+            return [false_list4; values]
         end
     end
     push!(event_count, values)
