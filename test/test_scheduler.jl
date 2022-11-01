@@ -240,6 +240,8 @@ end
     @test create_schedule(scheduler) == [("math", 150, 180)]
     scheduler.eventTimes = Set([("math", 2, 30, 4, 0, "every monday")])
     @test create_schedule(scheduler) == [("math", 1590, 1620)]
+    scheduler.eventTimes = Set([("math", 14, 30, 15, 0, "every day")])
+    @test create_schedule(scheduler) == [("math", 870, 900)]
 end
 
 @testitem "1x2x1EventTimes" begin
@@ -267,3 +269,26 @@ end
         ("math", 1470, 1530),("END", 40320, 40321)],2,scheduler) == false
 end
 
+@testitem "fillEmptyGaps" begin
+    """v"""
+    scheduler = Scheduler()
+    scheduler.schedule = []
+    @test fillEmptyGaps(scheduler.schedule) == [("", 0, 40320)]
+    scheduler.schedule = [("math", 0, 1250), ("chem", 1305, 1440)]
+    @test fillEmptyGaps(scheduler.schedule) == [
+        ("math", 0, 1250),("", 1250, 1305),("chem", 1305, 1440),("", 1440, 40320)]
+end
+
+@testitem "separateMultidayEvents" begin
+    """ad."""
+    scheduler = Scheduler()
+    @test separateMultidayEvents(scheduler.schedule) == []
+    @test separateMultidayEvents([("math", 0, 1000)]) == [("math", 0, 1000)]
+    @test separateMultidayEvents([("math", 0, 1440)]) == [("math", 0, 1440)]
+    @test separateMultidayEvents([("math", 0, 1500)]) == [
+        ("math", 0, 1440),("math", 1440, 1500)]
+    @test separateMultidayEvents([("math", 0, 3000)]) == [
+        ("math", 0, 1440),("math", 1440, 2880),("math", 2880, 3000)]
+    @test separateMultidayEvents([("math", 0, 1500),("chem", 1500, 3000)]) == [
+        ("math", 0, 1440),("math", 1440, 1500),("chem", 1500, 2880),("chem", 2880, 3000)]
+end

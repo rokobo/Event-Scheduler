@@ -1,6 +1,8 @@
 module scheduler
+using PlotlyJS, DataFrames, ColorSchemes, Colors
 export create_schedule
 export cleanEvents, checkFirst, checkLast, checkEventTimes
+export createDataframe, fillEmptyGaps, separateMultidayEvents, plotSchedule
 export Scheduler
 
 weekToNumber = Dict([
@@ -30,6 +32,7 @@ mutable struct Scheduler
     allLast = All allowed last events         (for optimization)
     maxEventsLeft = Total number of events    (for optimization)
     """
+    schedule::Vector{Tuple{String,Int64,Int64}}
     eventCount::Set{Tuple{String,Int64,Int64,String}}
     eventTimes::Set{Tuple{String,Int64,Int64,Int64,Int64,String}}
     logic::Set{Tuple{String,String,String}}
@@ -45,7 +48,7 @@ mutable struct Scheduler
     firstEvents::Dict{String, Vector{String}}
     lastEvents::Dict{String, Vector{String}}
     Scheduler() = new(
-        Set(), Set(), Set(), Set(), false, false, false, 1, Set(), Set(), Set(), 0,
+        [], Set(), Set(), Set(), Set(), false, false, false, 1, Set(), Set(), Set(), 0,
         Dict("monday"=>[],"tuesday"=>[],"wednesday"=>[],"thursday"=>[],"friday"=>[],"saturday"=>[],"sunday"=>[]),
         Dict("monday"=>[],"tuesday"=>[],"wednesday"=>[],"thursday"=>[],"friday"=>[],"saturday"=>[],"sunday"=>[]),
     )
@@ -61,14 +64,12 @@ end
 function create_schedule(data::Scheduler)::Vector{Tuple{String,Int64,Int64}}
     itemsLeft = addEventsLeft(data)
     optimize(itemsLeft, data)
-    schedule = addBlockedEvents(data)
-    schedule = append!([("START", -1, 0)], schedule)
+    data.schedule = addBlockedEvents(data)
+    schedule = append!([("START", -1, 0)], data.schedule)
     push!(schedule, ("END", 40320, 40321))
     printConfig(data)
     backtrack(schedule, itemsLeft, 1, data)
-    global schedule
-    schedule = schedule[2:end-1]
-    return schedule
+    return data.schedule
 end
 
 function addEventsLeft(data::Scheduler)::Vector{Tuple{String, Int32}}
@@ -605,8 +606,7 @@ function backtrack(current::Vector{Tuple{String,Int64,Int64}}, itemsLeft::Vector
         return false
     end
     if isempty(itemsLeft)
-        global schedule
-        schedule = current
+        data.schedule = current[2:end-1]
         return true
     end
 
@@ -614,7 +614,9 @@ function backtrack(current::Vector{Tuple{String,Int64,Int64}}, itemsLeft::Vector
     time = 0
     a = length(itemsLeft)
     while true
-
+        # if a == data.maxEventsLeft
+        #     println(time)
+        # end
         newCurrent, new_add_index, newTime = fit(
             current, itemsLeft[1], time)
         if newCurrent !== nothing
@@ -631,4 +633,121 @@ function backtrack(current::Vector{Tuple{String,Int64,Int64}}, itemsLeft::Vector
     end
     return false
 end
+
+function fillEmptyGaps(oldSchedule::Vector{Tuple{String,Int64,Int64}})::Vector{Tuple{String,Int64,Int64}}
+    """
+    Fill empty gaps between event so that every minute has a related event.
+    """
+    schedule = []
+    push!(schedule, ("", -1, 0))
+    append!(oldSchedule, [("END", 40320, 40321)])
+
+    for event in oldSchedule
+        if event[2] != schedule[end][3]
+            push!(schedule, ("", schedule[end][3], event[2]))
+        end
+        push!(schedule, event)
+    end
+    return schedule[2:end-1]
+end
+
+function separateMultidayEvents(schedule::Vector{Tuple{String,Int64,Int64}})::Vector{Tuple{String,Int64,Int64}}
+    newSchedule = []
+    for event in schedule
+        startDay = event[2] ÷ 1440
+        endDay = event[3] ÷ 1440
+        if event[3] % 1440 == 0
+            endDay -= 1
+        end
+        if startDay != endDay
+            push!(newSchedule, (event[1], event[2], (startDay + 1) * 1440))
+            for day in range(startDay + 1, endDay - 1)
+                push!(newSchedule, (event[1], day * 1440, (day + 1) * 1440))
+            end
+            push!(newSchedule, (event[1], endDay * 1440, event[3]))
+        else
+            push!(newSchedule, event)
+        end
+    end
+    return newSchedule
+end
+
+function createDataframe(data::Vector{Tuple{String,Int64,Int64}})::Vector{DataFrame}
+    """
+    Creates the dataframes used to plot the schedule graphs.
+    """
+    # After separateMultidayEvents(), events are assumed to not be multiday
+    filledSchedule = fillEmptyGaps(data)
+    schedule = separateMultidayEvents(filledSchedule)
+
+    # Events are separated into dataframes representing the 4 weeks of a month
+    w1 = DataFrame(name=String[], day=String[], hour=Float64[], order=Int64[], fill_color=RGB[],opacity=Float16[], line_color=RGB[], display=String[])
+    w2 = DataFrame(name=String[], day=String[], hour=Float64[], order=Int64[], fill_color=RGB[],opacity=Float16[], line_color=RGB[], display=String[])
+    w3 = DataFrame(name=String[], day=String[], hour=Float64[], order=Int64[], fill_color=RGB[],opacity=Float16[], line_color=RGB[], display=String[])
+    w4 = DataFrame(name=String[], day=String[], hour=Float64[], order=Int64[], fill_color=RGB[],opacity=Float16[], line_color=RGB[], display=String[])
+    weeks = [w1, w2, w3, w4]
+    pos = 0
+
+    # Unique and distinguishable colors are created for each event
+    uniqueElements = Set([i[1] for i in schedule])
+    uniqueCount = length(uniqueElements)
+    scheme = ColorScheme(distinguishable_colors(uniqueCount, [RGB(1,1,1), RGB(0,0,0)], dropseed=true))
+    Allcolors = get(scheme, [i/(uniqueCount-1) for i in range(0, uniqueCount-1)])
+    colors = Dict(pop!(uniqueElements) => color for color in Allcolors)
+    
+    # Add each event to the appropriate DataFrame
+    for event in schedule
+        day = event[3] ÷ 1440
+        timeEnd = (event[3] / 60) % 24
+        if event[3] % 1440 == 0
+            timeEnd = 24
+            day -= 1
+        end
+        timeStart = (event[2] / 60) % 24
+        weekday = numberToWeek[(day%7)+1]
+        height = timeEnd - timeStart
+        timeStart = (event[2] / 60) % 24
+        index = ((event[2] ÷ 1440) ÷ 7) + 1
+        fill_color = colors[event[1]]
+        line_color = RGB(0,0,0)
+        fill_opacity = 1.0
+        if event[1] == ""  # Spaces between events are background colored
+            fill_color = RGB(0,0,1)
+            fill_opacity = 0.0
+            line_color = RGB(0,0,0)
+        end
+        text = string(event[2], "-", event[3], "<br>", 23)
+        push!(weeks[index], (event[1], weekday, height, pos, fill_color,fill_opacity,line_color, text))
+        pos -= 1
+    end
+    return weeks
+end
+
+function plotSchedule(df::DataFrame)
+    """
+    Plots the schedule using the provided DataFrame.
+    Assumes DataFrame has been provided by createDataframe().
+    """
+    layout = Layout(
+        title_text="Week 1", height=500,
+        barmode="stack", showlegend=false,
+        xaxis=attr(
+            categoryorder="array", 
+            categoryarray=["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], showgrid=true
+        ),
+        yaxis=attr(
+            tickmode="linear", dtick=1, range=[0, 24], showgrid=true
+        ),
+    )
+    config = PlotConfig(
+        scrollZoom=false, displayModeBar=false
+    )
+    fig = plot(
+        df, x=:x, y=:y, marker_color=:color, text=:name, hovertext=:display,
+        kind="bar", layout=layout, config=config, marker_line=attr(color="black", width=0.2),
+        hovertemplate="%{hovertext}"
+    )
+    return fig
+    end
+
 end
