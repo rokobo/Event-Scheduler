@@ -1,8 +1,8 @@
 module scheduler
 using PlotlyJS, DataFrames, ColorSchemes, Colors
 export create_schedule
-export cleanEvents, checkFirst, checkLast, checkEventTimes
-export createDataframe, fillEmptyGaps, separateMultidayEvents, plotSchedule
+export cleanEvents, checkEventTimes
+export fillEmptyGaps, separateMultidayEvents, plotSchedule, createDataframe
 export Scheduler
 
 weekToNumber = Dict([
@@ -14,51 +14,37 @@ numberToWeek = String[
     "sunday", "monday", "tuesday", "wednesday",
     "thursday", "friday", "saturday"
 ]
-
 mutable struct Scheduler
     """
-    eventCount = Name, duration and repetition of events e.g.("math", 2, 3, "per week")
+    eventCount = Name, duration and repetition of events e.g.("math", 2, 30, "per week")
     eventTimes = Allowed times for a given event e.g.("math", 2, 34, 15, 7, "every day")
     logic = Sequential logic: which events go before or after others e.g.("math", "before", "chem")
     blockedTimes = Times where events cannot exist e.g.(12, 4, 21, 45, "per day")
     fitInterval = Interval between each event fit attempt
-    firstEvents = Allowed first events for each weekday
-    lastEvents = Allowed last events for each weekday
     hasTimes = If there are event times rules (for optimization)
-    hasFirst = If there are first event rules (for optimization)
-    hasLast = If there are last event rules   (for optimization)
+    hasLogic = If there are logic rules   (for optimization)
     allTimes = All event times events         (for optimization)
-    allFirst = All allowed first events       (for optimization)
-    allLast = All allowed last events         (for optimization)
     maxEventsLeft = Total number of events    (for optimization)
+    weeks = 4 DataFrames to use for plotting
+    plots = 4 plots to show the schedule of 4 weeks
     """
+    items::Vector{String}
     schedule::Vector{Tuple{String,Int64,Int64}}
     eventCount::Set{Tuple{String,Int64,Int64,String}}
     eventTimes::Set{Tuple{String,Int64,Int64,Int64,Int64,String}}
     logic::Set{Tuple{String,String,String}}
     blockedTimes::Set{Tuple{Int64,Int64,Int64,Int64,String}}
     hasTimes::Bool
-    hasFirst::Bool
-    hasLast::Bool
+    hasLogic::Bool
     fitInterval::Int64
     allTimes::Set{String}
-    allFirst::Set{String}
-    allLast::Set{String}
     maxEventsLeft::Int64
-    firstEvents::Dict{String, Vector{String}}
-    lastEvents::Dict{String, Vector{String}}
+    weeks::Vector{DataFrame}
+    plots::Vector{PlotlyJS.SyncPlot}
     Scheduler() = new(
-        [], Set(), Set(), Set(), Set(), false, false, false, 1, Set(), Set(), Set(), 0,
-        Dict("monday"=>[],"tuesday"=>[],"wednesday"=>[],"thursday"=>[],"friday"=>[],"saturday"=>[],"sunday"=>[]),
-        Dict("monday"=>[],"tuesday"=>[],"wednesday"=>[],"thursday"=>[],"friday"=>[],"saturday"=>[],"sunday"=>[]),
+        [], [], Set(), Set(), Set(), Set(), false, false, 1, Set(), 0,
+        [], []
     )
-end
-
-function printConfig(data::Scheduler)
-    println("\u001b[96mEvent count: ", data.eventCount, "\u001b[0m")
-    println("\u001b[96mAll times: ", data.allTimes, "\u001b[0m")
-    println("\u001b[96mFirst events: ", data.allFirst, "\u001b[0m")
-    println("\u001b[96mLast events: ", data.allLast, "\u001b[0m")
 end
 
 function create_schedule(data::Scheduler)::Vector{Tuple{String,Int64,Int64}}
@@ -67,7 +53,6 @@ function create_schedule(data::Scheduler)::Vector{Tuple{String,Int64,Int64}}
     data.schedule = addBlockedEvents(data)
     schedule = append!([("START", -1, 0)], data.schedule)
     push!(schedule, ("END", 40320, 40321))
-    printConfig(data)
     backtrack(schedule, itemsLeft, 1, data)
     return data.schedule
 end
@@ -115,30 +100,6 @@ function cleanEvents(blocks::Vector{Tuple{String,Int64,Int64}})::Vector{Tuple{St
 end
 
 function optimize(left::Vector{Tuple{String, Int32}}, data::Scheduler)
-    firstEventList = values(data.firstEvents)
-    if any(x -> !isempty(x), firstEventList)
-        data.hasFirst = true
-        firstEvents = Vector{String}()
-        for items in firstEventList
-            if !isempty(items)
-                append!(firstEvents, items)
-            end
-        end
-        data.allFirst = Set(firstEvents)
-    end
-
-    lastEventList = values(data.lastEvents)
-    if any(x -> !isempty(x), lastEventList)
-        data.hasLast = true
-        lastEvents = Vector{String}()
-        for items in lastEventList
-            if !isempty(items)
-                append!(lastEvents, items)
-            end
-        end
-        data.allLast = Set(lastEvents)
-    end
-
     data.hasTimes = !isempty(data.eventTimes)
     if data.hasTimes
         eventTimes = Vector{String}()
@@ -148,6 +109,7 @@ function optimize(left::Vector{Tuple{String, Int32}}, data::Scheduler)
         data.allTimes = Set(eventTimes)
     end
 
+    data.hasLogic = !isempty(data.logic)
     data.maxEventsLeft = length(left)
 end
 
@@ -193,27 +155,15 @@ function invalid(schedule::Vector{Tuple{String,Int64,Int64}}, index::Int64, isFu
     if length(schedule) < 3
         return false
     end
-    if length(schedule) > 3
-        if checkEventLogic(schedule, index, data)
-            return true
+    if data.hasLogic
+        if length(schedule) > 3
+            if checkEventLogic(schedule, index, data)
+                return true
+            end
         end
     end
     if checkEventCount(schedule, index, data)
         return true
-    end
-    if data.hasFirst
-        if isFull
-            if checkFirst(schedule, data)
-                return true
-            end
-        end
-    end
-    if data.hasLast
-        if isFull
-            if checkLast(schedule, data)
-                return true
-            end
-        end
     end
     return false
 end
@@ -441,92 +391,6 @@ function checkEventCountInMonth(schedule::Vector{Tuple{String,Int64,Int64}}, rul
     return false
 end
 
-function checkFirst(schedule::Vector{Tuple{String,Int64,Int64}}, data::Scheduler)::Bool
-    lastCheckedDay = nothing
-    for i in range(2, length(schedule) - 1)
-        event = schedule[i]
-        eventStartDay = event[2] ÷ 1440
-        eventEndDay = event[3] ÷ 1440
-        if lastCheckedDay == eventStartDay
-            if eventStartDay == eventEndDay
-                continue
-            else
-                for day in range(eventStartDay + 1, eventEndDay +1)
-                    allowed_events = data.firstEvents[
-                        numberToWeek[(day % 7) + 1]]
-                    lastCheckedDay = day
-                    # Check if there are any rules for the day
-                    if isempty(allowed_events)
-                        continue
-                    end
-                    if event[1] ∉ allowed_events
-                        return true
-                    end
-                end
-            end
-        else
-            lastCheckedDay = eventStartDay
-            # Check if event is the first event of the start day until the end day
-            for day in range(eventStartDay, eventEndDay)
-                allowed_events = data.firstEvents[
-                    numberToWeek[(day % 7) + 1]]
-                lastCheckedDay = day
-                # Check if there are any rules for the day
-                if isempty(allowed_events)
-                    continue
-                end
-                if event[1] ∉ allowed_events
-                    return true
-                end
-            end
-        end
-    end
-    return false
-end
-
-function checkLast(schedule::Vector{Tuple{String,Int64,Int64}}, data::Scheduler)::Bool
-    lastCheckedDay = nothing
-    for i in range(length(schedule) - 1, 2, step=-1)
-        event = schedule[i]
-        eventStartDay = event[2] ÷ 1440
-        eventEndDay = event[3] ÷ 1440
-        if lastCheckedDay == eventStartDay
-            if eventStartDay == eventEndDay
-                continue
-            else
-                for day in range(eventEndDay +1, eventStartDay + 1, step=-1)
-                    allowed_events = data.lastEvents[
-                        numberToWeek[(day % 7) + 1]]
-                    lastCheckedDay = day
-                    # Check if there are any rules for the day
-                    if isempty(allowed_events)
-                        continue
-                    end
-                    if event[1] ∉ allowed_events
-                        return true
-                    end
-                end
-            end
-        else
-            lastCheckedDay = eventEndDay
-            # Check if event is the last event of the end day until the start day
-            for day in range(eventEndDay, eventStartDay, step=-1)
-                allowed_events = data.lastEvents[
-                    numberToWeek[(day % 7) + 1]]
-                lastCheckedDay = day
-                # Check if there are any rules for the day
-                if isempty(allowed_events)
-                    continue
-                end
-                if event[1] ∉ allowed_events
-                    return true
-                end
-            end
-        end
-    end
-    return false
-end
-
 function checkEventTimes(schedule::Vector{Tuple{String,Int64,Int64}}, index::Int64, data::Scheduler)::Bool
     # Current schedule is only valid if one rule fully allows it
     event = schedule[index]
@@ -612,11 +476,7 @@ function backtrack(current::Vector{Tuple{String,Int64,Int64}}, itemsLeft::Vector
 
     # Recursive logic
     time = 0
-    a = length(itemsLeft)
     while true
-        # if a == data.maxEventsLeft
-        #     println(time)
-        # end
         newCurrent, new_add_index, newTime = fit(
             current, itemsLeft[1], time)
         if newCurrent !== nothing
@@ -672,12 +532,12 @@ function separateMultidayEvents(schedule::Vector{Tuple{String,Int64,Int64}})::Ve
     return newSchedule
 end
 
-function createDataframe(data::Vector{Tuple{String,Int64,Int64}})::Vector{DataFrame}
+function createDataframe(data::Scheduler)
     """
     Creates the dataframes used to plot the schedule graphs.
     """
     # After separateMultidayEvents(), events are assumed to not be multiday
-    filledSchedule = fillEmptyGaps(data)
+    filledSchedule = fillEmptyGaps(data.schedule)
     schedule = separateMultidayEvents(filledSchedule)
 
     # Events are separated into dataframes representing the 4 weeks of a month
@@ -692,9 +552,12 @@ function createDataframe(data::Vector{Tuple{String,Int64,Int64}})::Vector{DataFr
     uniqueElements = Set([i[1] for i in schedule])
     uniqueCount = length(uniqueElements)
     scheme = ColorScheme(distinguishable_colors(uniqueCount, [RGB(1,1,1), RGB(0,0,0)], dropseed=true))
-    Allcolors = get(scheme, [i/(uniqueCount-1) for i in range(0, uniqueCount-1)])
-    colors = Dict(pop!(uniqueElements) => color for color in Allcolors)
-    
+    if uniqueCount != 1 
+        allColors = get(scheme, [i/(uniqueCount-1) for i in range(0, uniqueCount-1)])
+    else
+        allColors = get(scheme, [0.0])
+    end
+    colors = Dict(pop!(uniqueElements) => color for color in allColors)
     # Add each event to the appropriate DataFrame
     for event in schedule
         day = event[3] ÷ 1440
@@ -706,48 +569,68 @@ function createDataframe(data::Vector{Tuple{String,Int64,Int64}})::Vector{DataFr
         timeStart = (event[2] / 60) % 24
         weekday = numberToWeek[(day%7)+1]
         height = timeEnd - timeStart
-        timeStart = (event[2] / 60) % 24
         index = ((event[2] ÷ 1440) ÷ 7) + 1
         fill_color = colors[event[1]]
         line_color = RGB(0,0,0)
         fill_opacity = 1.0
-        if event[1] == ""  # Spaces between events are background colored
-            fill_color = RGB(0,0,1)
+        if event[1] == ""  # Spaces between events are invisible
+            fill_color = RGB(0,0,0)
             fill_opacity = 0.0
             line_color = RGB(0,0,0)
+        elseif event[1] == "BLOCKED"
+            fill_opacity = 0.2
         end
-        text = string(event[2], "-", event[3], "<br>", 23)
+        local_minute1 = (event[2] % 1440)
+        hour1 = local_minute1 ÷ 60
+        minute1 = ((local_minute1 / 60) - hour1) * 60
+        local_minute2 = (event[3] % 1440)
+        hour2 = local_minute2 ÷ 60
+        minute2 = ((local_minute2 / 60) - hour2) * 60
+        text = string(
+            "Event: \"", event[1], "\"",
+            "<br>", 
+            "Time: ", hour1, ":", trunc(Int, minute1), "-", hour2, ":", trunc(Int, minute2),
+            "<br>", 
+            "Day ", day+1, ": ", weekday)
         push!(weeks[index], (event[1], weekday, height, pos, fill_color,fill_opacity,line_color, text))
         pos -= 1
     end
-    return weeks
+    data.weeks = weeks
 end
 
-function plotSchedule(df::DataFrame)
+function plotSchedule(data::Scheduler)
     """
-    Plots the schedule using the provided DataFrame.
-    Assumes DataFrame has been provided by createDataframe().
+    Plots the schedule using the DataFrames from weeks.
     """
+    createDataframe(data)
     layout = Layout(
-        title_text="Week 1", height=500,
-        barmode="stack", showlegend=false,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(100,100,100,0)",
+        height=800, barmode="stack", showlegend=false,
         xaxis=attr(
             categoryorder="array", 
-            categoryarray=["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], showgrid=true
+            categoryarray=["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], 
+            title_font=attr(color=RGB(1,1,1)), tickfont=attr(color=RGB(1,1,1))
         ),
         yaxis=attr(
-            tickmode="linear", dtick=1, range=[0, 24], showgrid=true
+            tickmode="linear", dtick=1, range=[0, 24.5], 
+            title_font=attr(color=RGB(1,1,1)), tickfont=attr(color=RGB(1,1,1))
         ),
     )
-    config = PlotConfig(
-        scrollZoom=false, displayModeBar=false
-    )
-    fig = plot(
-        df, x=:x, y=:y, marker_color=:color, text=:name, hovertext=:display,
-        kind="bar", layout=layout, config=config, marker_line=attr(color="black", width=0.2),
-        hovertemplate="%{hovertext}"
-    )
-    return fig
+    config = PlotConfig(displayModeBar=true)
+        #scrollZoom=false, displayModeBar=false,
+        #modeBarButtonsToRemove=["zoom", "pan"]
+    #)
+    plots = Vector{PlotlyJS.SyncPlot}()
+    for i in range(1, 4)
+        fig = plot(
+            data.weeks[i], x=:day, y=:hour, marker_color=:fill_color,
+            text=:name, hovertext=:display, kind="bar", layout, 
+            config=config, marker_line=attr(color=:line_color, width=1.25),
+            hovertemplate="%{hovertext}", marker_opacity=:opacity
+        )
+        push!(plots, fig)
     end
-
+    data.plots = plots
 end
+end  # end of module

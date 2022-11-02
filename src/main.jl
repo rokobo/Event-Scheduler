@@ -1,39 +1,17 @@
+include("scheduler.jl")
+using .scheduler
+using PlotlyJS
+using DataFrames
 using Dash, DashBootstrapComponents
 
-items = String[
-    string("test", i) for i in range(1, 200)
-]
-event_count = Set{Tuple{String,Int64,Int64,String}}([
-    ("math", 2, 3, "per week")])
-blocked_times = Set{Tuple{Int64,Int64,Int64,Int64,String}}([
-    (12, 4, 21, 45, "per day")
-])
-event_times = Set{Tuple{String,Int64,Int64,Int64,Int64,String}}([
-    ("math", 2, 34, 15, 7, "every day")
-])
-logic = Set{Tuple{String, String, String}}([
-    ("math", "before", "meth")
-])
-first_events = Dict{String, Vector{String}}(
-    "monday"=>[], "tuesday"=>[],
-    "wednesday"=>[], "thursday"=>[],
-    "friday"=>[], "saturday"=>[],
-    "sunday"=>[]
-)
-last_events = Dict{String, Vector{String}}(
-    "monday"=>[], "tuesday"=>[],
-    "wednesday"=>[], "thursday"=>[],
-    "friday"=>[], "saturday"=>[],
-    "sunday"=>[]
-)
+schedule = Scheduler()
+schedule.eventCount = Set([("matches", 2, 310, "per day")])
 frequency_checklist_pattern = r"(?P<event>.+) (?P<frequency>[0-9]+)x(?P<duration>[0-9]+)min (?P<interval>per [a-z]+)"
 blocked_checklist_pattern = r"(?P<hour1>[0-9]+):(?P<minutes1>[0-9]+)-(?P<hour2>[0-9]+):(?P<minutes2>[0-9]+) (?P<interval>every .+)"
 allowed_checklist_pattern = r"(?P<event>.+) (?P<hour1>[0-9]+):(?P<minutes1>[0-9]+)-(?P<hour2>[0-9]+):(?P<minutes2>[0-9]+) (?P<interval>every .+)"
 logic_checklist_pattern = r"(?P<event1>.+) (?P<logic>before|after) (?P<event2>.+)"
 
-app = dash(
-    external_stylesheets=[dbc_themes.BOOTSTRAP]
-)
+app = dash(external_stylesheets=[dbc_themes.BOOTSTRAP])
 
 app.layout = html_div(style=Dict("padding" => "15px")) do 
     dbc_row([
@@ -146,59 +124,6 @@ app.layout = html_div(style=Dict("padding" => "15px")) do
             ])], 
                 title="Add events, Define frequency and Free time ↓", 
                 item_id="a1"),
-            dbc_accordionitem([
-                dbc_row([
-                    dbc_col(html_h6("Sunday"), width=2),
-                    dbc_col(dcc_dropdown(id="first_sunday",
-                        placeholder="First event", multi=true)),
-                    dbc_col(dcc_dropdown(id="last_sunday",
-                        placeholder="Last event", multi=true))
-                ], className="g-0"),
-                dbc_row([
-                    dbc_col(html_h6("Monday"), width=2),
-                    dbc_col(dcc_dropdown(id="first_monday",
-                        placeholder="First event", multi=true)),
-                    dbc_col(dcc_dropdown(id="last_monday",
-                        placeholder="Last event", multi=true))
-                ], className="g-0"),
-                dbc_row([
-                    dbc_col(html_h6("Tuesday"), width=2),
-                    dbc_col(dcc_dropdown(id="first_tuesday",
-                        placeholder="First event", multi=true)),
-                    dbc_col(dcc_dropdown(id="last_tuesday",
-                        placeholder="Last event", multi=true))
-                ], className="g-0"),
-                dbc_row([
-                    dbc_col(html_h6("Wednesday"), width=2),
-                    dbc_col(dcc_dropdown(id="first_wednesday",
-                        placeholder="First event", multi=true)),
-                    dbc_col(dcc_dropdown(id="last_wednesday",
-                        placeholder="Last event", multi=true))
-                ], className="g-0"),
-                dbc_row([
-                    dbc_col(html_h6("Thursday"), width=2),
-                    dbc_col(dcc_dropdown(id="first_thursday",
-                        placeholder="First event", multi=true)),
-                    dbc_col(dcc_dropdown(id="last_thursday",
-                        placeholder="Last event", multi=true))
-                ], className="g-0"),
-                dbc_row([
-                    dbc_col(html_h6("Friday"), width=2),
-                    dbc_col(dcc_dropdown(id="first_friday",
-                        placeholder="First event", multi=true)),
-                    dbc_col(dcc_dropdown(id="last_friday",
-                        placeholder="Last event", multi=true))
-                ], className="g-0"),
-                dbc_row([
-                    dbc_col(html_h6("Saturday"), width=2),
-                    dbc_col(dcc_dropdown(id="first_saturday",
-                        placeholder="First event", multi=true)),
-                    dbc_col(dcc_dropdown(id="last_saturday",
-                        placeholder="Last event", multi=true))
-                ], className="g-0")
-            ],
-                title="First and Last events of the day ↓", 
-                item_id="a2"),
             dbc_accordionitem([dbc_row([
                 dbc_col([
                     html_h6("Define allowed times"),
@@ -265,8 +190,8 @@ app.layout = html_div(style=Dict("padding" => "15px")) do
                 ])
             ])],
                 title="Breaks and Allowed event times ↓", 
-                item_id="a3")
-        ], always_open=true, active_item=["a1", "a2", "a3"])]),
+                item_id="a2")
+        ], always_open=true, active_item=["a1", "a2"])]),
         dbc_col([
             dbc_tabs([
                 dbc_tab(label="Events", tab_id="Events", children=[
@@ -319,7 +244,7 @@ app.layout = html_div(style=Dict("padding" => "15px")) do
                             className="subChecklistStyle")
                     ], className="checklistContainer")                    
                 ])
-            ], active_tab="Sequential"),
+            ], active_tab="Events"),
         ])
     ]),
     dbc_row([
@@ -343,13 +268,13 @@ app.layout = html_div(style=Dict("padding" => "15px")) do
         dbc_row([
             dbc_col(dbc_input(
                         id="select_fit_interval",
-                        placeholder="Event fit interval",
+                        placeholder="Event fit interval (default is 1 min)",
                         size="md", type="number",
-                        min=1, max=10080, step=1), width=8),
+                        min=1, max=60, step=1), width=8),
             dbc_tooltip(
                 "Select how often a pending event should \
                     try a fit after another set event. Note that \
-                        more frequent fits take more time to process",
+                        more frequent fits take more time to process (max 60 min)",
                 target="select_fit_interval"),
             dbc_col(dbc_button(
                 "Make schedule", id="make_schedule_button",
@@ -368,7 +293,8 @@ app.layout = html_div(style=Dict("padding" => "15px")) do
                 color="primary", outline=false)),
             dbc_col(dbc_button(
                 "Week 4", id="select_week_4",
-                color="primary", outline=false))
+                color="primary", outline=false)),
+            dbc_col(html_h3(dbc_badge(id="selected_week")))
         ], style=Dict("margin-bottom" => "15px")),
         dbc_row(
             dcc_graph(id="schedule")
@@ -376,23 +302,21 @@ app.layout = html_div(style=Dict("padding" => "15px")) do
     ], style=Dict("margin-top" => "20px"))
 end
 
-
-# Update event list
 callback!(app,
     Output("events_input", "value"),
     Input("events_input", "value")
 ) do event_input
+    """Adds events typed in the add events form."""
     if event_input !== nothing
         clean_input = strip(event_input, ' ')
         if clean_input != ""
-            if clean_input ∉ items
-                push!(items, lowercase(clean_input))
+            if clean_input ∉ schedule.items
+                push!(schedule.items, lowercase(clean_input))
             end
         end
     end
     return ""
 end
-
 
 callback!(app,
     Output("event_checklist", "value"),
@@ -400,15 +324,15 @@ callback!(app,
     Input("event_checklist", "value"),
     Input("events_input", "value")
 ) do events, _refresh
-    global items
+    """Monitors the event checklist for deletions and displays the rules."""
     caller_id = callback_context().triggered[1][1]
     if caller_id == "events_input.value"
-        options = [Dict("label"=>i, "value"=>i) for i in items]
-        value = items 
+        options = [Dict("label"=>i, "value"=>i) for i in schedule.items]
+        value = schedule.items 
     else  # "event_checklist.value
         options = [Dict("label"=>i, "value"=>i) for i in events]
         value = events
-        items = [event for event in events]
+        schedule.items = [event for event in events]
 
         # Change checklists to not include deleted event
     end
@@ -416,19 +340,13 @@ callback!(app,
 end
 
 callback!(app,
-    Output("first_monday", "options"), Output("last_monday", "options"),
-    Output("first_tuesday", "options"), Output("last_tuesday", "options"),
-    Output("first_wednesday", "options"), Output("last_wednesday", "options"),
-    Output("first_thursday", "options"), Output("last_thursday", "options"),
-    Output("first_friday", "options"), Output("last_friday", "options"),
-    Output("first_saturday", "options"), Output("last_saturday", "options"),
-    Output("first_sunday", "options"), Output("last_sunday", "options"),
     Output("select_logic_event1", "options"), Output("select_logic_event2", "options"),
     Output("select_allowed_event", "options"), Output("select_event", "options"),
     Input("events_input", "value"), Input("event_checklist", "value")
 ) do _refresh1, _refresh2
-    events = [Dict("label"=>i, "value"=>i) for i in items]
-    return [events for _ in range(1, 1, 18)]
+    """Refreshes the event options of all selectors when a change is made."""
+    events = [Dict("label"=>i, "value"=>i) for i in schedule.items]
+    return [events, events, events, events]
 end
 
 false_list4 = Any[false, false, false, false]
@@ -447,7 +365,7 @@ callback!(app,
     State("select_duration", "value"),
     State("select_interval", "value")
 ) do _refresh, event, frequency, duration, interval
-    global event_count
+    """Parses the event frequency form and reports errors to the user."""
     values = [event, frequency, duration, interval]
     return_value = Any[
         event === nothing, frequency === nothing,
@@ -461,10 +379,9 @@ callback!(app,
             return [false_list4; values]
         end
     end
-    push!(event_count, values)
+    push!(schedule.eventCount, Tuple(values))
     return false, false, false, false, nothing, nothing, nothing, nothing
 end
-
 
 callback!(app,
     Output("frequency_rules_checklist", "value"),
@@ -473,10 +390,10 @@ callback!(app,
     Input("event_checklist", "value"),
     Input("select_frequency", "invalid"),
 ) do frequency_rules, _refresh1, _refresh2
-    global event_count
+    """Monitors the frequency checklist for deletions and displays the rules."""
     caller_id = callback_context().triggered[1][1]
     if caller_id == "frequency_rules_checklist.value"
-        event_count = Set{Tuple{String,Int64,Int64,String}}([
+        schedule.eventCount = Set{Tuple{String,Int64,Int64,String}}([
             (res[:event], parse(Int64, res[:frequency]),
                 parse(Int64, res[:duration]), res[:interval])
             for res in [match(frequency_checklist_pattern, rule)
@@ -487,7 +404,7 @@ callback!(app,
     else # select_frequency.invalid or . or event_checklist.value
         value = [
             string(a[1], " ", a[2], "x", a[3], "min ", a[4]) 
-            for a in event_count]
+            for a in schedule.eventCount]
         options = [Dict("label"=>i, "value"=>i) for i in value]
     end
     return value, options
@@ -513,7 +430,7 @@ callback!(app,
     State("select_minutes2", "value"),
     State("select_blocked_interval", "value")
 ) do _refresh, hour1, minutes1, hour2, minutes2, interval
-    global blocked_times
+    """Parses the blocked periods form and reports errors to the user."""
     values = [hour1, minutes1, hour2, minutes2, interval]
     return_value = Any[
         hour1 === nothing || hour1 > 23 || hour1 < 0,
@@ -529,10 +446,9 @@ callback!(app,
             return [false_list5; values]
         end
     end
-    push!(blocked_times, Tuple(values))
+    push!(schedule.blockedTimes, Tuple(values))
     return [false_list5; nothing_list5]
 end
-
 
 callback!(app,
     Output("blocked_rules_checklist", "value"),
@@ -541,10 +457,10 @@ callback!(app,
     Input("select_hour1", "invalid"),
     Input("event_checklist", "value")
 ) do blocked_rules, _refresh1, _refresh2
-    global blocked_times
+    """Monitors the blocked checklist for deletions and displays the rules."""
     caller_id = callback_context().triggered[1][1]
     if caller_id == "blocked_rules_checklist.value"
-        blocked_times = Set{Tuple{Int64,Int64,Int64,Int64,String}}([
+        schedule.blockedTimes = Set{Tuple{Int64,Int64,Int64,Int64,String}}([
             (parse(Int64, res[:hour1]), parse(Int64, res[:minutes1]),
                 parse(Int64, res[:hour2]), parse(Int64, res[:minutes2]),
                 res[:interval])
@@ -557,58 +473,10 @@ callback!(app,
         value = [
             string(lpad(a[1], 2, "0"), ":", lpad(a[2], 2, "0"), "-", 
                 lpad(a[3], 2, "0"), ":", lpad(a[4], 2, "0"), " ", a[5]) 
-            for a in blocked_times]
+            for a in schedule.blockedTimes]
         options = [Dict("label"=>i, "value"=>i) for i in value]
     end
     return value, options
-end
-
-callback!(app,
-    Output("first_monday", "value"), Output("first_tuesday", "value"),
-    Output("first_wednesday", "value"), Output("first_thursday", "value"),
-    Output("first_friday", "value"), Output("first_saturday", "value"),
-    Output("first_sunday", "value"), Output("last_monday", "value"),
-    Output("last_tuesday", "value"), Output("last_wednesday", "value"),
-    Output("last_thursday", "value"), Output("last_friday", "value"),
-    Output("last_saturday", "value"), Output("last_sunday", "value"),
-    Input("first_monday", "value"), Input("first_tuesday", "value"),
-    Input("first_wednesday", "value"), Input("first_thursday", "value"),
-    Input("first_friday", "value"), Input("first_saturday", "value"),
-    Input("first_sunday", "value"), Input("last_monday", "value"),
-    Input("last_tuesday", "value"), Input("last_wednesday", "value"),
-    Input("last_thursday", "value"), Input("last_friday", "value"),
-    Input("last_saturday", "value"), Input("last_sunday", "value"),
-    Input("first_monday", "options")
-) do first_mon, first_tue, first_wed, first_thu,
-first_fri, first_sat, first_sun, last_mon, last_tue,
-last_wed, last_thu, last_fri, last_sat, last_sun, _refresh
-    global first_events, last_events
-    first = Dict(
-        "monday" => first_mon, "tuesday" => first_tue,
-        "wednesday" => first_wed, "thursday" => first_thu,
-        "friday" => first_fri, "saturday" => first_sat,
-        "sunday" => first_sun
-    )
-    last = Dict(
-        "monday" => last_mon, "tuesday" => last_tue,
-        "wednesday" => last_wed, "thursday" => last_thu,
-        "friday" => last_fri, "saturday" => last_sat,
-        "sunday" => last_sun
-    )
-    caller_id = callback_context().triggered[1][1]
-    if caller_id != "first_monday.options"
-        day = split(caller_id, "_")[2][1:end-6]
-        first_events[day] = first[day]
-        last_events[day] = last[day]
-    end
-    println(first_events)
-    return first_events["monday"], first_events["tuesday"],
-        first_events["wednesday"], first_events["thursday"],
-        first_events["friday"], first_events["saturday"],
-        first_events["sunday"], last_events["monday"], 
-        last_events["tuesday"], last_events["wednesday"],
-        last_events["thursday"], last_events["friday"], 
-        last_events["saturday"], last_events["sunday"]
 end
 
 nothing_list6 = Any[nothing, nothing, nothing, nothing, nothing, nothing]
@@ -634,7 +502,7 @@ callback!(app,
     State("allowed_minutes2", "value"),
     State("select_allowed_interval", "value")
 ) do _refresh, event, hour1, minutes1, hour2, minutes2, interval
-    global event_times
+    """Parses the allowed events form and reports errors to the user."""
     values = [event, hour1, minutes1, hour2, minutes2, interval]
     return_value = [
         event === nothing,
@@ -651,10 +519,9 @@ callback!(app,
             return [false_list6; values]
         end
     end
-    push!(event_times, Tuple(values))
+    push!(schedule.eventTimes, Tuple(values))
     return [false_list6; nothing_list6]
 end
-
 
 callback!(app,
     Output("allowed_rules_checklist", "value"),
@@ -663,10 +530,10 @@ callback!(app,
     Input("allowed_hour1", "invalid"),
     Input("event_checklist", "value")
 ) do allowed_rules, _refresh, _refresh2
-    global event_times
+    """Monitors the allowed checklist for deletions and displays the rules."""
     caller_id = callback_context().triggered[1][1]
     if caller_id == "allowed_rules_checklist.value"
-        event_times = Set{Tuple{String,Int64,Int64,Int64,Int64,String}}([
+        schedule.eventTimes = Set{Tuple{String,Int64,Int64,Int64,Int64,String}}([
             (res[:event], parse(Int64, res[:hour1]), 
                 parse(Int64, res[:minutes1]), parse(Int64, res[:hour2]), 
                 parse(Int64, res[:minutes2]), res[:interval])
@@ -679,14 +546,11 @@ callback!(app,
         value = [
             string(a[1], " ", lpad(a[2], 2, "0"), ":", lpad(a[3], 2, "0"),
                 "-", lpad(a[4], 2, "0"), ":", lpad(a[5], 2, "0"), " ", a[6]) 
-            for a in event_times]
+            for a in schedule.eventTimes]
         options = [Dict("label"=>i, "value"=>i) for i in value]
     end
     return value, options
 end
-
-
-
 
 nothing_list3 = Any[nothing, nothing, nothing]
 false_list3 = Any[false, false, false]
@@ -702,7 +566,7 @@ callback!(app,
     State("select_logic_interval", "value"),
     State("select_logic_event2", "value")
 ) do _refresh, event1, logic_rule, event2
-    global logic
+    """Parses the sequential logic form and reports errors to the user."""
     values = [event1, logic_rule, event2]
     return_value = [
         event1 === nothing,
@@ -716,10 +580,9 @@ callback!(app,
             return [false_list3; values]
         end
     end
-    push!(logic, Tuple(values))
+    push!(schedule.logic, Tuple(values))
     return [false_list3; nothing_list3]
 end
-
 
 callback!(app,
     Output("logic_rules_checklist", "value"),
@@ -728,10 +591,10 @@ callback!(app,
     Input("select_logic_event1", "invalid"),
     Input("event_checklist", "value")
 ) do logic_rules, _refresh, _refresh2
-    global logic
+    """Monitors the logic checklist for deletions and displays the rules."""
     caller_id = callback_context().triggered[1][1]
     if caller_id == "logic_rules_checklist.value"
-        logic = Set{Tuple{String,String,String}}([
+        schedule.logic = Set{Tuple{String,String,String}}([
             (res[:event1], res[:logic], res[:event2])
             for res in [match(logic_checklist_pattern, rule)
                 for rule in logic_rules]
@@ -741,16 +604,51 @@ callback!(app,
     else # allowed_hour1.invalid or . or event_checklist.value
         value = [
             string(a[1], " ", a[2], " ", a[3]) 
-            for a in logic]
+            for a in schedule.logic]
         options = [Dict("label"=>i, "value"=>i) for i in value]
     end
     return value, options
 end
 
+callback!(app,
+    Output("make_schedule_button", "n_clicks"),
+    Input("make_schedule_button", "n_clicks"),
+    State("select_fit_interval", "value")
+) do _refresh, interval
+    """Creates schedule using the available information."""
+    if !isnothing(interval)
+        schedule.fitInterval = interval
+    else
+        schedule.fitInterval = 1
+    end
+    create_schedule(schedule)
+    println("\u001b[96m[Callback info]:\u001b[0m Schedule created with ", schedule.fitInterval, " min interval")
+    return _refresh
+end
 
+callback!(app,
+    Output("schedule", "figure"),
+    Output("selected_week", "children"),
+    Input("make_schedule_button", "n_clicks"),
+    Input("select_week_1", "n_clicks"),
+    Input("select_week_2", "n_clicks"),
+    Input("select_week_3", "n_clicks"),
+    Input("select_week_4", "n_clicks"),
+    prevent_initial_call=true
+) do _refresh0, _refresh1, _refresh2, _refresh3, _refresh4
+    """Generates plots for the schedule."""
+    caller_id = callback_context().triggered[1][1]
+    if caller_id == "make_schedule_button.n_clicks"
+        index = 1
+        plotSchedule(schedule)
+    else
+        index = parse(Int, caller_id[13])
+    end
+    if length(schedule.plots) != 4
+        plotSchedule(schedule)
+    end
+    println("\u001b[96m[Callback info]:\u001b[0m Plot ", index, " loaded")
+    return schedule.plots[index], string("Week ", index, " selected")
+end
 
-
-
-
-run_server(app, "0.0.0.0", 8050, 
-debug = false, dev_tools_hot_reload=true)
+run_server(app, "0.0.0.0", 8050, debug = false, dev_tools_hot_reload=true)
