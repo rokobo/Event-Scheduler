@@ -1,6 +1,6 @@
 # Event scheduler
 
-This was a project aimed at developing a recursive backtracking algorithm. While the traditional route would be Sudoku or some kind of grid search, I wanted to do something unique and useful. This is the product of that wish.
+This was a project aimed at developing a recursive backtracking algorithm. While the traditional route would be Sudoku or some kind of grid search, I wanted to do something unique and useful. This is the product of that wish, a program that helps people organize their month by generating a schedule from a collection of rules and events.
 
 ## Uses
 
