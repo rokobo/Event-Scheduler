@@ -40,7 +40,7 @@ body::-webkit-scrollbar {
 }
 .checklistContainer {
     overflow-y: auto;
-    height: 700px;
+    height: 550px;
 }
 ::-webkit-scrollbar {
     background: rgb(36, 36, 36);

@@ -5,7 +5,6 @@ using DataFrames
 using Dash, DashBootstrapComponents
 
 schedule = Scheduler()
-schedule.eventCount = Set([("matches", 2, 310, "per day")])
 frequency_checklist_pattern = r"(?P<event>.+) (?P<frequency>[0-9]+)x(?P<duration>[0-9]+)min (?P<interval>per [a-z]+)"
 blocked_checklist_pattern = r"(?P<hour1>[0-9]+):(?P<minutes1>[0-9]+)-(?P<hour2>[0-9]+):(?P<minutes2>[0-9]+) (?P<interval>every .+)"
 allowed_checklist_pattern = r"(?P<event>.+) (?P<hour1>[0-9]+):(?P<minutes1>[0-9]+)-(?P<hour2>[0-9]+):(?P<minutes2>[0-9]+) (?P<interval>every .+)"
